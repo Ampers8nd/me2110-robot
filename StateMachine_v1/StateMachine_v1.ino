@@ -1,4 +1,4 @@
-  #include <myDuino.h>
+#include <myDuino.h>
 myDuino robot(1);
 
 // ====== STATE MACHINE ======
@@ -13,9 +13,11 @@ State currentState = WAITING;
 // ====== TIMING VARIABLES ======
 unsigned long stateStartTime = 0;
 unsigned long motorStartTime = 0;
+unsigned long activationCycleStarted = false;
 bool motorStartSet = false;
 bool motorEndAnnounced = false;
-const unsigned long MOTOR_ACTIVE_TIME = 5000; // 5 seconds
+bool withinCenter = false;
+const unsigned long MOTOR_ACTIVE_TIME = 2000; // /1000 seconds
 const unsigned long ACTIVE_STATE_TIME = 40000;     // 40 seconds
 const unsigned long COOLDOWN_STATE_TIME = 180000;  // 3 minutes
 
@@ -25,6 +27,10 @@ const int SMALL_MOTOR_PIN = 2; // Remove if big motor is powerful enough
 const int MOTOR_SPEED = 200; // CHANGE IF NEEDED
 const int MOTOR_FORWARD = 1; // SWAP INT IF NEEDED
 const int MOTOR_BACKWARD = 2;
+
+// ===== DISTANCE VARIABLES =====
+// what variable and units does the IR sensor return?
+const float DISTANCE_FROM_CENTER = 10; // cm
 
 // ====== BUTTON DEBOUNCE ======
 const int BANANA_PLUG_PIN = 1; // CHANGE IF NEEDED
@@ -69,17 +75,20 @@ void loop() {
 
       if (bananaPlugState == 1) { // Banana Plugs connected for the first time
         currentState = ACTIVE;
-        stateStartTime = millis(); // Start 40s timer
+        if (!activationCycleStarted) {
+          activationCycleStarted = true;
+          stateStartTime = millis(); // Start 40s timer
+        }
         Serial.println("Banana Plugs Connected. Started ACTIVE state.");
         if (!motorStartSet) {
           motorStartTime = millis();
           motorStartSet = true;
         }
-        activateSystem(motorStartTime);
+        activateDriveTrain(motorStartTime);
         // Serial.println(motorStartTime);
       }
 
-      if (millis() - stateStartTime >= ACTIVE_STATE_TIME) { // 40 seconds reached, potential loss of banana plug power along the way
+      if (millis() - stateStartTime >= ACTIVE_STATE_TIME && activationCycleStarted) { // 40 seconds reached, potential loss of banana plug power along the way
         Serial.println("40 seconds reached. Entering COOLDOWN.");
         deActivateSystem(); // Stop all systems regardless of plug state
         currentState = COOLDOWN;
@@ -100,10 +109,10 @@ void loop() {
           motorStartSet = true;
       }
 
-      activateSystem(motorStartTime); // Keep motors running while active
+      activateDriveTrain(motorStartTime); // Keep motors running while active
       // is there a chance motorStartTime here can be anything that isn't what we want it to be?
 
-      if (millis() - stateStartTime >= ACTIVE_STATE_TIME) { // 40 seconds reached
+      if (millis() - stateStartTime >= ACTIVE_STATE_TIME && activationCycleStarted) { // 40 seconds reached
         Serial.println("40 seconds reached. Entering COOLDOWN.");
         deActivateSystem(); // Stop all systems regardless of plug state
         currentState = COOLDOWN;
@@ -124,6 +133,9 @@ void loop() {
 
       // reset motor active set flag
       motorStartSet = false;
+      withinCenter = false;
+      motorEndAnnounced = false;
+      activationCycleStarted = false;
       break;
 
     default:
@@ -134,16 +146,33 @@ void loop() {
   delay(50);
 }
 
-void activateSystem(unsigned long motorStartTime) { // Activate System Subsystem
-  if (millis() - motorStartTime < MOTOR_ACTIVE_TIME) {
+void activateDriveTrain(unsigned long motorStartTime) { // Activate System Subsystem
+  // i think this runs per cycle?
+  // IR sensor reading
+  int irDistanceRaw = robot.readIR();
+  float irFiltered = convertIRReading(irDistanceRaw);
+  if (irFiltered < DISTANCE_FROM_CENTER) {
+    withinCenter = true;
+  }
+
+  // OR will make it so that timer does not necessarily have to run out for motor to stop running. it needs to reach a designated spot first.
+  if (millis() - motorStartTime < MOTOR_ACTIVE_TIME || !withinCenter) {
+    // Serial.println(irFiltered);
     robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED);
+    // LED can be used to indicate motor movement
+    robot.LED(1, true);
     // robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED); // DELETE IF NOT NEEDED
-  } else {
-    if (!motorEndAnnounced) {
+    if (millis() - motorStartTime > MOTOR_ACTIVE_TIME && !motorEndAnnounced) {
       Serial.println("Motor Time Limit reached.");
-      robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
       motorEndAnnounced = true;
     }
+  } else {
+      if (withinCenter) {
+        // Serial.println("Within Center.");
+        robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
+        robot.LED(1, false);
+      }
+      // motorEndAnnounced = true;
   }
   robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED); // DELETE IF NOT NEEDED
 }
@@ -151,6 +180,20 @@ void activateSystem(unsigned long motorStartTime) { // Activate System Subsystem
 void deActivateSystem() { // Deactivate All Subsystems
   robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
   robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0); // DELETE IF NOT NEEDED
+  robot.LED(1, false);
+}
+
+float convertIRReading(int irValue) {
+  float distance = 2076.0 / (irValue - 11.0);
+  if (distance > 0 && distance < 150) { // Filter unreasonable values
+    // Serial.print("\tEstimated distance: ");
+    // Serial.print(distance);
+    // Serial.println(" cm");
+    return distance;
+  } else {
+    // Serial.println("\tOut of range");
+    return 99999; // return arbitrarily high so we don't accidentally stop
+  }
 }
 
 // ===== IMPLEMENT LATER =====
