@@ -12,9 +12,9 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   float us_value = robot.readUltrasonic();
-  if (us_value < 7.5) {
-    robot.moveMotor(1, 2, 0);
+  if (us_value < 5.5) {
+    robot.moveMotor(1, 1, 0);
   } else {
-    robot.moveMotor(1,2,200);
+    robot.moveMotor(1,1,200);
   }
 }

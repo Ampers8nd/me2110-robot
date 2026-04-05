@@ -10,6 +10,13 @@ enum State {
 
 State currentState = WAITING;
 
+// ====== TASK ACTIVATION VARIABLES ========
+// THESE SHOULD ALL BE SET TO TRUE FOR SPRINTS AND COMPETITION 
+bool defeatKoopaActive = true;
+bool stabilizeReactorActive = true; // purely mechanical, this var does nothing
+bool deliverMarioActive = false;
+bool feedLumaActive = false;
+
 // ====== TIMING VARIABLES ======
 unsigned long stateStartTime = 0;
 unsigned long motorStartTime = 0;
@@ -18,7 +25,7 @@ bool motorStartSet = false;
 bool motorEndAnnounced = false;
 bool withinCenter = false;
 const unsigned long MOTOR_ACTIVE_TIME = 2500; // 
-const unsigned long ACTIVE_STATE_TIME = 40000;     // 40 seconds
+const unsigned long ACTIVE_STATE_TIME = 40000;     // 40 seconds, reduce for comp or sprint for buffer
 const unsigned long COOLDOWN_STATE_TIME = 180000;  // 3 minutes
 
 // ===== MOTOR VARIABLES =====
@@ -161,8 +168,11 @@ void activateDriveTrain(unsigned long motorStartTime) { // Activate System Subsy
   int irDistanceRaw = robot.readIR();
   float irFiltered = convertIRReading(irDistanceRaw);
   float us_value = robot.readUltrasonic();
-  if (us_value < DISTANCE_FROM_CENTER) {
+  // Prevent hysteresis by placing distance from center var lower than the the knockback value
+  if (us_value < DISTANCE_FROM_CENTER - 0.5) {
     withinCenter = true;
+  } else if (us_value > DISTANCE_FROM_CENTER + 0.5) {
+    withinCenter = false;
   }
 
   // OR will make it so that timer does not necessarily have to run out for motor to stop running. it needs to reach a designated spot first.
@@ -212,5 +222,7 @@ void deliverMario() {}
 void feedLumas() {}
 void stabilizeReactor() {}
 void defeatKoopas() {
-  robot.digital(2,1);
+  if (defeatKoopaActive) {
+    robot.digital(2,1);
+  }
 }
