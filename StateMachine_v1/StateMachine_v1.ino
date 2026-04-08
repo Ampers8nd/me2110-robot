@@ -7,37 +7,39 @@ enum State {
   ACTIVE,    // Running for 40 seconds
   COOLDOWN   // Forced 3-minute shutdown
 };
-
 State currentState = WAITING;
 
 // ====== TASK ACTIVATION VARIABLES ========
 // THESE SHOULD ALL BE SET TO TRUE FOR SPRINTS AND COMPETITION 
-bool defeatKoopaActive = true;
+bool defeatKoopaActive = false;
 bool stabilizeReactorActive = true; // purely mechanical, this var does nothing
 bool deliverMarioActive = false;
 bool feedLumaActive = false;
+const int DEFEAT_KOOPA_PIN = 2; // which DO the actuator is connected to.
+const int PUSHBTN_PIN = 3; // which DI the push button is connected to.
 
 // ====== TIMING VARIABLES ======
 unsigned long stateStartTime = 0;
 unsigned long motorStartTime = 0;
 unsigned long activationCycleStarted = false;
 bool motorStartSet = false;
-bool motorEndAnnounced = false;
-bool withinCenter = false;
-const unsigned long MOTOR_ACTIVE_TIME = 2500; // 
+// 
 const unsigned long ACTIVE_STATE_TIME = 40000;     // 40 seconds, reduce for comp or sprint for buffer
 const unsigned long COOLDOWN_STATE_TIME = 180000;  // 3 minutes
+
+// ====== 4-SECOND TIMER VARIABLES ======
+bool triggered = false;
+bool lastBtnState = false;
+const unsigned long TIMEOUT_4S = 4000;
+unsigned long timer4sStartTime = 0;
+bool timer4sActive = false;
 
 // ===== MOTOR VARIABLES =====
 const int BIG_MOTOR_PIN = 1; // CHANGE INT IF NEEDED
 const int SMALL_MOTOR_PIN = 2; // Remove if big motor is powerful enough
 const int MOTOR_SPEED = 200; // CHANGE IF NEEDED
-const int MOTOR_FORWARD = 2; // SWAP INT IF NEEDED
-const int MOTOR_BACKWARD = 1;
-
-// ===== DISTANCE VARIABLES =====
-// what variable and units does the IR sensor return?
-const float DISTANCE_FROM_CENTER = 5.5; // cm
+const int MOTOR_FORWARD = 1; // SWAP INT IF NEEDED
+const int MOTOR_BACKWARD = 2;
 
 // ====== BUTTON DEBOUNCE ======
 const int BANANA_PLUG_PIN = 1; // CHANGE IF NEEDED
@@ -53,6 +55,9 @@ void encHandler() {
 
 void setup() {
   Serial.begin(9600);
+  
+  // Initialize the trigger button state
+  lastBtnState = robot.readButton(PUSHBTN_PIN);
 
   // ===== ENCODER SETUP =====
   attachInterrupt(digitalPinToInterrupt(2), encHandler, CHANGE);
@@ -62,7 +67,6 @@ void setup() {
 void loop() {
   // ====== READ & DEBOUNCE BUTTON ======
   int bananaPlugReading = robot.readButton(BANANA_PLUG_PIN);
-
   if (bananaPlugReading != lastBananaPlugReading) {
     lastDebounceTime = millis();
   }
@@ -73,8 +77,7 @@ void loop() {
   lastBananaPlugReading = bananaPlugReading;
 
   // ====== STATE MACHINE ======
-  // Note: This logic assumes bananaPlugState == 1 means CONNECTED. 
-  
+  // Note: This logic assumes bananaPlugState == 1 means CONNECTED.
   switch (currentState) {
 
     case WAITING:
@@ -86,16 +89,21 @@ void loop() {
           activationCycleStarted = true;
           stateStartTime = millis(); // Start 40s timer
         }
+        
+        // Start the 4-second button timer
+        timer4sStartTime = millis();
+        timer4sActive = true;
+        triggered = false;
+        
         Serial.println("Banana Plugs Connected. Started ACTIVE state.");
         if (!motorStartSet) {
           motorStartTime = millis();
           motorStartSet = true;
         }
         activateDriveTrain(motorStartTime);
-        // Serial.println(motorStartTime);
       }
 
-      if (millis() - stateStartTime >= ACTIVE_STATE_TIME && activationCycleStarted) { // 40 seconds reached, potential loss of banana plug power along the way
+      if (millis() - stateStartTime >= ACTIVE_STATE_TIME && activationCycleStarted) { // 40 seconds reached
         Serial.println("40 seconds reached. Entering COOLDOWN.");
         deActivateSystem(); // Stop all systems regardless of plug state
         currentState = COOLDOWN;
@@ -107,41 +115,67 @@ void loop() {
       if (bananaPlugState == 0) { // Banana Plugs disconnected prematurely
         Serial.println("Banana Plugs Disconnected. Deactivating system.");
         deActivateSystem();
+        
+        // Stop/Reset the 4-second timer
+        timer4sActive = false;
+        triggered = false;
+        
         currentState = WAITING; // Return to waiting state
         break;
       }
 
-      if (!motorStartSet) {
-          motorStartTime = millis();
-          motorStartSet = true;
+      // --- 4-SECOND OVERRIDE LOGIC ---
+      bool btnState = robot.readButton(PUSHBTN_PIN);
+      
+      // Check for button trigger
+      if (!triggered && btnState != lastBtnState) {
+        triggered = true;
+        Serial.println("Pin 3 Btn triggered, motors will stop.");
       }
+      lastBtnState = btnState;
 
-      activateDriveTrain(motorStartTime); // Keep motors running while active
-      // is there a chance motorStartTime here can be anything that isn't what we want it to be?
+      // Check if 4 seconds have passed in the ACTIVE state
+      bool timeoutReached = timer4sActive && (millis() - timer4sStartTime >= TIMEOUT_4S);
 
-      // if (millis() - motorStartTime >= MOTOR_ACTIVE_TIME) {
-      //   // Serial.println("Motor should stop now.");
-      // }
+      if (triggered || timeoutReached) {
+        // Hard override: Stop the motors regardless of what activateDriveTrain wants
+        robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
+        // robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0); Small motor is part of a different subsystem, DO NOT UNCOMMENT!
+        robot.LED(1, false);
+        
+        // Activate Koopa mechanism exactly when the robot stops
+        // Activate Koopa should be moved towards the end because it is now mixed in with feed lumas.
+        defeatKoopas();
+        // deliverMario();
+      } else {
+        // Proceed with normal drive train logic if not triggered and under 4s
+        if (!motorStartSet) {
+            motorStartTime = millis();
+            motorStartSet = true;
+        }
+        activateDriveTrain(motorStartTime); // Keep motors running while active
+      }
+      // --------------------------------
+
+      // Feed Luma/Defeat Koopa Activation
+      // Implementation TBD
 
       if (millis() - stateStartTime >= ACTIVE_STATE_TIME && activationCycleStarted) { // 40 seconds reached
-        Serial.println("40 seconds reached. Entering COOLDOWN.");
+        Serial.println("Hard timeout (40s) seconds reached. Entering COOLDOWN.");
         deActivateSystem(); // Stop all systems regardless of plug state
+        
+        // Stop/Reset the 4-second timer
+        timer4sActive = false;
+        triggered = false;
+        
         currentState = COOLDOWN;
         stateStartTime = millis(); // Start 3 min timer
-      }
-
-      if (withinCenter) {
-        // activate koopa mechanism
-        defeatKoopas();
       }
       break;
 
     case COOLDOWN:
       deActivateSystem(); // Enforce shutdown
       
-      // We don't check bananaplugs here because they don't matter
-      // hopefully this code doesnt crap itself when we change the cooldown.
-
       if (millis() - stateStartTime >= COOLDOWN_STATE_TIME) { // After 3 minutes
         currentState = WAITING;
         Serial.println("COOLDOWN complete, returning to WAITING.");
@@ -149,9 +183,9 @@ void loop() {
 
       // reset motor active set flag
       motorStartSet = false;
-      withinCenter = false;
-      motorEndAnnounced = false;
       activationCycleStarted = false;
+      // reset motor triggered flag
+      triggered = false;
       break;
 
     default:
@@ -163,56 +197,31 @@ void loop() {
 }
 
 void activateDriveTrain(unsigned long motorStartTime) { // Activate System Subsystem
-  // i think this runs per cycle?
   // IR sensor reading
   int irDistanceRaw = robot.readIR();
   float irFiltered = convertIRReading(irDistanceRaw);
-  float us_value = robot.readUltrasonic();
-  // Prevent hysteresis by placing distance from center var lower than the the knockback value
-  if (us_value < DISTANCE_FROM_CENTER - 0.5) {
-    withinCenter = true;
-  } else if (us_value > DISTANCE_FROM_CENTER + 0.5) {
-    withinCenter = false;
-  }
-
-  // OR will make it so that timer does not necessarily have to run out for motor to stop running. it needs to reach a designated spot first.
-  if (millis() - motorStartTime < MOTOR_ACTIVE_TIME || !withinCenter) {
-    Serial.println(irFiltered);
-    robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED);
-    // LED can be used to indicate motor movement
-    robot.LED(1, true);
-    // robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED); // DELETE IF NOT NEEDED
-    if (millis() - motorStartTime > MOTOR_ACTIVE_TIME && !motorEndAnnounced) {
-      Serial.println("Motor Time Limit reached.");
-      motorEndAnnounced = true;
-    }
-  } else {
-      if (withinCenter) {
-        // Serial.println("Within Center.");
-        robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
-        robot.LED(1, false);
-      }
-      // motorEndAnnounced = true;
-  }
-  robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED); // DELETE IF NOT NEEDED
+  
+  // Motor runs continuously here. 
+  // Stopping is handled strictly by the 4s timer/button override in loop().
+  Serial.println(irFiltered);
+  robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED);
+  robot.LED(1, true);
+  
+  // robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED); // DELETE IF NOT NEEDED
 }
 
 void deActivateSystem() { // Deactivate All Subsystems
   robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
   robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0); // DELETE IF NOT NEEDED
   robot.LED(1, false);
-  robot.digital(2,0); // deactivates koopa piston;
+  robot.digital(DEFEAT_KOOPA_PIN,0); // deactivates koopa piston;
 }
 
 float convertIRReading(int irValue) {
   float distance = 2076.0 / (irValue - 11.0);
   if (distance > 0 && distance < 150) { // Filter unreasonable values
-    // Serial.print("\tEstimated distance: ");
-    // Serial.print(distance);
-    // Serial.println(" cm");
     return distance;
   } else {
-    // Serial.println("\tOut of range");
     return 99999; // return arbitrarily high so we don't accidentally stop
   }
 }
@@ -223,6 +232,6 @@ void feedLumas() {}
 void stabilizeReactor() {}
 void defeatKoopas() {
   if (defeatKoopaActive) {
-    robot.digital(2,1);
+    robot.digital(DEFEAT_KOOPA_PIN,1);
   }
 }

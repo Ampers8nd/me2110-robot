@@ -2,19 +2,37 @@
 myDuino robot(1);
 
 bool triggered = false;
-const float tgt_dist = 7.5;
+bool lastBtnState = false;
+bool printed = false;
+const unsigned long TIMEOUT = 3500; // 4 seconds in milliseconds
 
 void setup() {
-  // put your setup code here, to run once:
-
+  Serial.begin(9600);
+  lastBtnState = robot.readButton(1);
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  float us_value = robot.readUltrasonic();
-  if (us_value < 5.5) {
-    robot.moveMotor(1, 1, 0);
-  } else {
-    robot.moveMotor(1,1,200);
+  bool btnState = robot.readButton(1);
+
+  // Check for button trigger
+  if (!triggered && btnState != lastBtnState) {
+    triggered = true;
+    Serial.println("Btn triggered, stopping.");
   }
+
+  // Stop the motor if the button was triggered OR if 4 seconds have passed
+  if (triggered || millis() >= TIMEOUT) {
+    robot.moveMotor(1, 1, 0);
+    if (triggered && !printed) {
+      Serial.println("Button reached.");
+      printed = true;
+    } else if (millis() >= TIMEOUT && !printed) {
+      Serial.println("TIMED OUT.");
+      printed = true;
+    }
+  } else {
+    robot.moveMotor(1, 1, 255);
+  }
+
+  lastBtnState = btnState;
 }
