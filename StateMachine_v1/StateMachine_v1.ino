@@ -11,9 +11,10 @@ State currentState = WAITING;
 
 // ====== TASK ACTIVATION VARIABLES ========
 // THESE SHOULD ALL BE SET TO TRUE FOR SPRINTS AND COMPETITION 
-bool defeatKoopaActive = false;
+bool centerLogged = false; // logging center reaching
+bool defeatKoopaActive = true;
 bool stabilizeReactorActive = true; // purely mechanical, this var does nothing
-bool deliverMarioActive = false;
+bool deliverMarioActive = true;
 bool feedLumaActive = false;
 const int DEFEAT_KOOPA_PIN = 2; // which DO the actuator is connected to.
 const int PUSHBTN_PIN = 3; // which DI the push button is connected to.
@@ -23,9 +24,10 @@ unsigned long stateStartTime = 0;
 unsigned long motorStartTime = 0;
 unsigned long activationCycleStarted = false;
 bool motorStartSet = false;
-// 
+
 const unsigned long ACTIVE_STATE_TIME = 40000;     // 40 seconds, reduce for comp or sprint for buffer
 const unsigned long COOLDOWN_STATE_TIME = 180000;  // 3 minutes
+const unsigned long KOOPA_LEAD_TIME = 5000;        // activate 5 seconds before hard timeout
 
 // ====== 4-SECOND TIMER VARIABLES ======
 bool triggered = false;
@@ -33,6 +35,15 @@ bool lastBtnState = false;
 const unsigned long TIMEOUT_4S = 4000;
 unsigned long timer4sStartTime = 0;
 bool timer4sActive = false;
+
+// ====== DELIVER MARIO TIMER VARIABLES ======
+const unsigned long MARIO_RUNTIME = 10000; // 10 seconds, easily adjustable
+bool marioRunning = false;
+bool marioDone = false;
+unsigned long marioStartTime = 0;
+
+// ====== KOOPA TIMER VARIABLES ======
+bool koopaTriggered = false;
 
 // ===== MOTOR VARIABLES =====
 const int BIG_MOTOR_PIN = 1; // CHANGE INT IF NEEDED
@@ -94,8 +105,16 @@ void loop() {
         timer4sStartTime = millis();
         timer4sActive = true;
         triggered = false;
+
+        // Reset deliver Mario state for a fresh run
+        marioRunning = false;
+        marioDone = false;
+        marioStartTime = 0;
+
+        // Reset Koopa trigger for a fresh run
+        koopaTriggered = false;
         
-        Serial.println("Banana Plugs Connected. Started ACTIVE state.");
+        Serial.println("ACTIVE started.");
         if (!motorStartSet) {
           motorStartTime = millis();
           motorStartSet = true;
@@ -104,7 +123,7 @@ void loop() {
       }
 
       if (millis() - stateStartTime >= ACTIVE_STATE_TIME && activationCycleStarted) { // 40 seconds reached
-        Serial.println("40 seconds reached. Entering COOLDOWN.");
+        Serial.println("40s reached. Entering COOLDOWN.");
         deActivateSystem(); // Stop all systems regardless of plug state
         currentState = COOLDOWN;
         stateStartTime = millis(); // Start 3 min timer
@@ -113,12 +132,20 @@ void loop() {
 
     case ACTIVE:
       if (bananaPlugState == 0) { // Banana Plugs disconnected prematurely
-        Serial.println("Banana Plugs Disconnected. Deactivating system.");
+        Serial.println("Banana plugs disconnected.");
         deActivateSystem();
         
         // Stop/Reset the 4-second timer
         timer4sActive = false;
         triggered = false;
+
+        // Reset deliver Mario state
+        marioRunning = false;
+        marioDone = false;
+        marioStartTime = 0;
+
+        // Reset Koopa trigger
+        koopaTriggered = false;
         
         currentState = WAITING; // Return to waiting state
         break;
@@ -130,28 +157,44 @@ void loop() {
       // Check for button trigger
       if (!triggered && btnState != lastBtnState) {
         triggered = true;
-        Serial.println("Pin 3 Btn triggered, motors will stop.");
       }
       lastBtnState = btnState;
 
       // Check if 4 seconds have passed in the ACTIVE state
       bool timeoutReached = timer4sActive && (millis() - timer4sStartTime >= TIMEOUT_4S);
 
+      // Check if it is time to activate Koopa
+      bool koopaTimeReached = activationCycleStarted &&
+                              (millis() - stateStartTime >= ACTIVE_STATE_TIME - KOOPA_LEAD_TIME);
+
+      if (!koopaTriggered && koopaTimeReached) {
+        koopaTriggered = true;
+        defeatKoopas();
+        Serial.println("Koopa activated.");
+      }
+
       if (triggered || timeoutReached) {
-        // Hard override: Stop the motors regardless of what activateDriveTrain wants
+        // Hard override: Stop the big motor regardless of what activateDriveTrain wants
         robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
+
+        if (triggered && !centerLogged) {
+          Serial.println("Center reached: button.");
+          centerLogged = true;
+        } else if (timeoutReached && !centerLogged) {
+          Serial.println("Center reached: timeout.");
+          centerLogged = true;
+        }
+
         // robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0); Small motor is part of a different subsystem, DO NOT UNCOMMENT!
         robot.LED(1, false);
-        
-        // Activate Koopa mechanism exactly when the robot stops
-        // Activate Koopa should be moved towards the end because it is now mixed in with feed lumas.
-        defeatKoopas();
-        // deliverMario();
+
+        // Deliver Mario subsystem
+        deliverMario();
       } else {
         // Proceed with normal drive train logic if not triggered and under 4s
         if (!motorStartSet) {
-            motorStartTime = millis();
-            motorStartSet = true;
+          motorStartTime = millis();
+          motorStartSet = true;
         }
         activateDriveTrain(motorStartTime); // Keep motors running while active
       }
@@ -161,12 +204,20 @@ void loop() {
       // Implementation TBD
 
       if (millis() - stateStartTime >= ACTIVE_STATE_TIME && activationCycleStarted) { // 40 seconds reached
-        Serial.println("Hard timeout (40s) seconds reached. Entering COOLDOWN.");
+        Serial.println("Hard timeout reached. Entering COOLDOWN.");
         deActivateSystem(); // Stop all systems regardless of plug state
         
         // Stop/Reset the 4-second timer
         timer4sActive = false;
         triggered = false;
+
+        // Reset deliver Mario state
+        marioRunning = false;
+        marioDone = false;
+        marioStartTime = 0;
+
+        // Reset Koopa trigger
+        koopaTriggered = false;
         
         currentState = COOLDOWN;
         stateStartTime = millis(); // Start 3 min timer
@@ -178,7 +229,7 @@ void loop() {
       
       if (millis() - stateStartTime >= COOLDOWN_STATE_TIME) { // After 3 minutes
         currentState = WAITING;
-        Serial.println("COOLDOWN complete, returning to WAITING.");
+        Serial.println("COOLDOWN complete.");
       }
 
       // reset motor active set flag
@@ -186,6 +237,14 @@ void loop() {
       activationCycleStarted = false;
       // reset motor triggered flag
       triggered = false;
+
+      // reset deliver Mario state
+      marioRunning = false;
+      marioDone = false;
+      marioStartTime = 0;
+
+      // reset Koopa trigger
+      koopaTriggered = false;
       break;
 
     default:
@@ -197,13 +256,12 @@ void loop() {
 }
 
 void activateDriveTrain(unsigned long motorStartTime) { // Activate System Subsystem
-  // IR sensor reading
   int irDistanceRaw = robot.readIR();
   float irFiltered = convertIRReading(irDistanceRaw);
   
   // Motor runs continuously here. 
   // Stopping is handled strictly by the 4s timer/button override in loop().
-  Serial.println(irFiltered);
+  // Serial.println(irFiltered);
   robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED);
   robot.LED(1, true);
   
@@ -212,7 +270,7 @@ void activateDriveTrain(unsigned long motorStartTime) { // Activate System Subsy
 
 void deActivateSystem() { // Deactivate All Subsystems
   robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
-  robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0); // DELETE IF NOT NEEDED
+  robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0);
   robot.LED(1, false);
   robot.digital(DEFEAT_KOOPA_PIN,0); // deactivates koopa piston;
 }
@@ -227,9 +285,36 @@ float convertIRReading(int irValue) {
 }
 
 // ===== IMPLEMENT LATER =====
-void deliverMario() {}
+void deliverMario() {
+  if (!deliverMarioActive) {
+    return;
+  }
+
+  if (!marioRunning && !marioDone) {
+    marioRunning = true;
+    marioStartTime = millis();
+    robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 255);
+    Serial.println("Deliver Mario started.");
+    return;
+  }
+
+  if (marioRunning) {
+    unsigned long marioElapsed = millis() - marioStartTime;
+
+    if (marioElapsed >= MARIO_RUNTIME) {
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0);
+      marioRunning = false;
+      marioDone = true;
+      Serial.println("Deliver Mario complete.");
+    } else {
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 255);
+    }
+  }
+}
+
 void feedLumas() {}
 void stabilizeReactor() {}
+
 void defeatKoopas() {
   if (defeatKoopaActive) {
     robot.digital(DEFEAT_KOOPA_PIN,1);
