@@ -44,7 +44,7 @@ bool lastBtnState = false;
 const unsigned long MARIO_DELAY = 1000;        // delay after drivetrain stops before Mario starts
 const unsigned long MARIO_FORWARD_TIME = 1600; // time rotating forward to deliver
 const unsigned long MARIO_BACK_DELAY = 500;    // adjustable wait after forward rotation before rotating back
-const unsigned long MARIO_BACK_TIME = 1600;    // adjustable time rotating back
+const unsigned long MARIO_BACK_TIME = 600;    // adjustable time rotating back
 
 bool marioWaiting = false;
 bool marioRunningForward = false;
