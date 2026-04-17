@@ -14,10 +14,10 @@ bool usePushbuttonStop = true;
 bool centerLogged = false;
 
 // ====== TASK ACTIVATION VARIABLES ========
-bool defeatKoopaActive = false;
-bool stabilizeReactorActive = true;
+bool defeatKoopaActive = true;
+bool stabilizeReactorActive = true; // purely mechanical, does nothing
 bool deliverMarioActive = true;
-bool feedLumaActive = false;
+bool feedLumaActive = false; // purely mechanical, does nothing
 const int DEFEAT_KOOPA_PIN = 2;
 const int PUSHBTN_PIN = 3; 
 
@@ -27,7 +27,7 @@ unsigned long motorStartTime = 0;
 unsigned long activationCycleStarted = false;
 bool motorStartSet = false;
 
-const unsigned long ACTIVE_STATE_TIME = 40000;
+const unsigned long ACTIVE_STATE_TIME = 39000; // made 39 sec instead of 40 for safety margin
 const unsigned long COOLDOWN_STATE_TIME = 180000;
 const unsigned long KOOPA_LEAD_TIME = 5000;
 
@@ -44,7 +44,7 @@ bool lastBtnState = false;
 const unsigned long MARIO_DELAY = 1000;        // delay after drivetrain stops before Mario starts
 const unsigned long MARIO_FORWARD_TIME = 1600; // time rotating forward to deliver
 const unsigned long MARIO_BACK_DELAY = 500;    // adjustable wait after forward rotation before rotating back
-const unsigned long MARIO_BACK_TIME = 600;    // adjustable time rotating back
+const unsigned long MARIO_BACK_TIME = 900;    // adjustable time rotating back
 
 bool marioWaiting = false;
 bool marioRunningForward = false;
@@ -63,7 +63,7 @@ bool koopaTriggered = false;
 // ===== MOTOR VARIABLES =====
 const int BIG_MOTOR_PIN = 1;
 const int SMALL_MOTOR_PIN = 2;
-const int MOTOR_SPEED = 200;
+const int MOTOR_SPEED = 255; // ONLY for drivetrain motor!
 const int MOTOR_FORWARD = 1;
 const int MOTOR_BACKWARD = 2;
 
@@ -77,6 +77,7 @@ const unsigned long debounceDelay = 50;
 // ====== ENCODER INTERRUPT ======
 void encHandler() {
   robot.doEncoder();
+  // this does nothing because we don't use the encoder sensor
 }
 
 void setup() {
@@ -282,6 +283,7 @@ void loop() {
 void activateDriveTrain(unsigned long motorStartTime) {
   int irDistanceRaw = robot.readIR();
   float irFiltered = convertIRReading(irDistanceRaw);
+  // IR stuff is not really used.
 
   robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, MOTOR_SPEED);
   robot.LED(1, true);
@@ -295,6 +297,7 @@ void deActivateSystem() {
   robot.digital(DEFEAT_KOOPA_PIN, 0);
 }
 
+// Not used.
 float convertIRReading(int irValue) {
   float distance = 2076.0 / (irValue - 11.0);
   if (distance > 0 && distance < 150) {
@@ -323,7 +326,7 @@ void deliverMario() {
       marioWaiting = false;
       marioRunningForward = true;
       marioForwardStartTime = millis();
-      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 255);
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 155);
       Serial.println("Deliver Mario forward started.");
     }
     return;
@@ -338,7 +341,7 @@ void deliverMario() {
       marioBackDelayStartTime = millis();
       Serial.println("Deliver Mario forward complete.");
     } else {
-      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 255);
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 155);
     }
     return;
   }
@@ -349,7 +352,7 @@ void deliverMario() {
       marioWaitingBack = false;
       marioRunningBack = true;
       marioBackStartTime = millis();
-      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 255);
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 155);
       Serial.println("Deliver Mario reverse started.");
     }
     return;
@@ -363,7 +366,7 @@ void deliverMario() {
       marioDone = true;
       Serial.println("Deliver Mario complete.");
     } else {
-      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 255);
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 155);
     }
   }
 }
