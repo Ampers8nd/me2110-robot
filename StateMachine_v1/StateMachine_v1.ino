@@ -24,7 +24,7 @@ const int PUSHBTN_PIN = 3;
 // ====== TIMING VARIABLES ======
 unsigned long stateStartTime = 0;
 unsigned long motorStartTime = 0;
-unsigned long activationCycleStarted = false;
+bool activationCycleStarted = false;
 bool motorStartSet = false;
 
 const unsigned long ACTIVE_STATE_TIME = 39000; // made 39 sec instead of 40 for safety margin
@@ -277,7 +277,7 @@ void loop() {
       break;
   }
 
-  delay(50);
+  // delay(50);
 }
 
 void activateDriveTrain(unsigned long motorStartTime) {
