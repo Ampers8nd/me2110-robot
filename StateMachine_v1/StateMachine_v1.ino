@@ -16,7 +16,7 @@ bool centerLogged = false;
 // ====== TASK ACTIVATION VARIABLES ========
 bool defeatKoopaActive = false;
 bool stabilizeReactorActive = true;
-bool deliverMarioActive = false;
+bool deliverMarioActive = true;
 bool feedLumaActive = false;
 const int DEFEAT_KOOPA_PIN = 2;
 const int PUSHBTN_PIN = 3; 
@@ -41,13 +41,21 @@ bool btnTriggered = false;
 bool lastBtnState = false;
 
 // ====== DELIVER MARIO TIMER VARIABLES ======
-const unsigned long MARIO_DELAY = 1000;   // adjustable delay after stopping before Mario starts
-const unsigned long MARIO_RUNTIME = 1600; // adjustable Mario runtime
+const unsigned long MARIO_DELAY = 1000;        // delay after drivetrain stops before Mario starts
+const unsigned long MARIO_FORWARD_TIME = 1600; // time rotating forward to deliver
+const unsigned long MARIO_BACK_DELAY = 500;    // adjustable wait after forward rotation before rotating back
+const unsigned long MARIO_BACK_TIME = 1600;    // adjustable time rotating back
+
 bool marioWaiting = false;
-bool marioRunning = false;
+bool marioRunningForward = false;
+bool marioWaitingBack = false;
+bool marioRunningBack = false;
 bool marioDone = false;
+
 unsigned long marioDelayStartTime = 0;
-unsigned long marioStartTime = 0;
+unsigned long marioForwardStartTime = 0;
+unsigned long marioBackDelayStartTime = 0;
+unsigned long marioBackStartTime = 0;
 
 // ====== KOOPA TIMER VARIABLES ======
 bool koopaTriggered = false;
@@ -110,10 +118,14 @@ void loop() {
         centerLogged = false;
 
         marioWaiting = false;
-        marioRunning = false;
+        marioRunningForward = false;
+        marioWaitingBack = false;
+        marioRunningBack = false;
         marioDone = false;
         marioDelayStartTime = 0;
-        marioStartTime = 0;
+        marioForwardStartTime = 0;
+        marioBackDelayStartTime = 0;
+        marioBackStartTime = 0;
 
         koopaTriggered = false;
 
@@ -143,10 +155,14 @@ void loop() {
         centerLogged = false;
 
         marioWaiting = false;
-        marioRunning = false;
+        marioRunningForward = false;
+        marioWaitingBack = false;
+        marioRunningBack = false;
         marioDone = false;
         marioDelayStartTime = 0;
-        marioStartTime = 0;
+        marioForwardStartTime = 0;
+        marioBackDelayStartTime = 0;
+        marioBackStartTime = 0;
 
         koopaTriggered = false;
 
@@ -211,10 +227,14 @@ void loop() {
         centerLogged = false;
 
         marioWaiting = false;
-        marioRunning = false;
+        marioRunningForward = false;
+        marioWaitingBack = false;
+        marioRunningBack = false;
         marioDone = false;
         marioDelayStartTime = 0;
-        marioStartTime = 0;
+        marioForwardStartTime = 0;
+        marioBackDelayStartTime = 0;
+        marioBackStartTime = 0;
 
         koopaTriggered = false;
 
@@ -239,10 +259,14 @@ void loop() {
       centerLogged = false;
 
       marioWaiting = false;
-      marioRunning = false;
+      marioRunningForward = false;
+      marioWaitingBack = false;
+      marioRunningBack = false;
       marioDone = false;
       marioDelayStartTime = 0;
-      marioStartTime = 0;
+      marioForwardStartTime = 0;
+      marioBackDelayStartTime = 0;
+      marioBackStartTime = 0;
 
       koopaTriggered = false;
       break;
@@ -266,6 +290,7 @@ void activateDriveTrain(unsigned long motorStartTime) {
 void deActivateSystem() {
   robot.moveMotor(BIG_MOTOR_PIN, MOTOR_FORWARD, 0);
   robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0);
+  robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 0);
   robot.LED(1, false);
   robot.digital(DEFEAT_KOOPA_PIN, 0);
 }
@@ -284,37 +309,61 @@ void deliverMario() {
     return;
   }
 
-  // First call after stopping: begin delay period
-  if (!marioWaiting && !marioRunning && !marioDone) {
+  // First call after stopping: begin initial delay period
+  if (!marioWaiting && !marioRunningForward && !marioWaitingBack && !marioRunningBack && !marioDone) {
     marioWaiting = true;
     marioDelayStartTime = millis();
     Serial.println("Deliver Mario delay started.");
     return;
   }
 
-  // Wait adjustable delay before starting Mario motor
-  if (marioWaiting && !marioRunning) {
+  // Wait before starting forward motion
+  if (marioWaiting && !marioRunningForward) {
     if (millis() - marioDelayStartTime >= MARIO_DELAY) {
       marioWaiting = false;
-      marioRunning = true;
-      marioStartTime = millis();
+      marioRunningForward = true;
+      marioForwardStartTime = millis();
       robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 255);
-      Serial.println("Deliver Mario started.");
+      Serial.println("Deliver Mario forward started.");
     }
     return;
   }
 
-  // Run Mario motor for adjustable runtime
-  if (marioRunning) {
-    unsigned long marioElapsed = millis() - marioStartTime;
-
-    if (marioElapsed >= MARIO_RUNTIME) {
+  // Forward rotation phase
+  if (marioRunningForward) {
+    if (millis() - marioForwardStartTime >= MARIO_FORWARD_TIME) {
       robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 0);
-      marioRunning = false;
+      marioRunningForward = false;
+      marioWaitingBack = true;
+      marioBackDelayStartTime = millis();
+      Serial.println("Deliver Mario forward complete.");
+    } else {
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 255);
+    }
+    return;
+  }
+
+  // Wait before starting backward motion
+  if (marioWaitingBack && !marioRunningBack) {
+    if (millis() - marioBackDelayStartTime >= MARIO_BACK_DELAY) {
+      marioWaitingBack = false;
+      marioRunningBack = true;
+      marioBackStartTime = millis();
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 255);
+      Serial.println("Deliver Mario reverse started.");
+    }
+    return;
+  }
+
+  // Backward rotation phase
+  if (marioRunningBack) {
+    if (millis() - marioBackStartTime >= MARIO_BACK_TIME) {
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 0);
+      marioRunningBack = false;
       marioDone = true;
       Serial.println("Deliver Mario complete.");
     } else {
-      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_FORWARD, 155);
+      robot.moveMotor(SMALL_MOTOR_PIN, MOTOR_BACKWARD, 255);
     }
   }
 }
